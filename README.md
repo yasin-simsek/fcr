@@ -1,2 +1,2 @@
-# fcr
-Fuzzy Clustering Regression
+# Fuzzy Clustering Regression
+
