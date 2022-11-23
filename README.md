@@ -7,7 +7,6 @@ It extends "Fuzzy C-Means" algorithms to regression setup and approximates "Hard
 The general specification of Fuzzy Clustering Regression is as follows:
 
 $
-
 y_i  = \sum_{g=1}^G \gamma_{i,g} x_i \theta_g +  z_i \beta + \nu_i
 $
 
