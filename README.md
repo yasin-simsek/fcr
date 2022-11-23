@@ -129,4 +129,4 @@ $$
 
 ## An Example
 
-We replicate some results of [Lewis et al.(2022)](https://drive.google.com/file/d/1U_MJHtJcB7H1Edv3xceilU_HJoxhLssP/view) in this notebook. Users can consider that notebook as a tutorial on how to us `fcr` package with real data.
+We replicate some results of [Lewis et al.(2022)](https://drive.google.com/file/d/1U_MJHtJcB7H1Edv3xceilU_HJoxhLssP/view) in [this notebook](https://github.com/yasin-simsek/fcr/blob/main/Replication.ipynb). Users can consider that notebook as a tutorial on how to us `fcr` package with real data.
