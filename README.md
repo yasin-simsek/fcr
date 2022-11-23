@@ -6,10 +6,10 @@ It extends "Fuzzy C-Means" algorithms to regression setup and approximates "Hard
 
 The general specification of Fuzzy Clustering Regression is as follows:
 
-$
+$$
 \Large
 y_i  = \sum_{g=1}^G \gamma_{i,g} x_i \theta_g +  z_i \beta + \nu_i
-$
+$$
 
 where $i=1,2,...,N$, $y_i \in \mathbb{R}^T$, $x_i \in \mathbb{R}^T \times \mathbb{R}^K$, $z_i \in \mathbb{R}^T \times \mathbb{R}^L$ and $\gamma_{i,g} = \mathbb{1}[g_i=g]$. Note that $\theta_g$ is a $K \times 1$ vector representing the group specific (heterogenous) coeffcieints and $\beta$ is $Lx1$ vector stands for homogenous coeffcients. Finally, we assume $\mathbb{E}[\nu_i|g_i=g]=0$.
 
@@ -23,19 +23,19 @@ This specification encompasses many different variations.
  
 The goal is to estimate the group memberships ($\gamma_{i,g}$), heterogenous coefficients ($\theta_g$) and homogenous coefficients($\beta$). Estimation of discrete group memberships requires computationally expensive step-wise procedures. Indeed, FCR objective function introduces the group membership function which assigns probability to each group/cluster for each observation. Specifically, the objective function is
 
-$
+$$
 \Large
 L_m^{F C R}(\theta, \mu)=\mathbb{E}\left[\sum_{g=1}^G \mu_g^m\left\|y-\theta_g x\right\|^2\right] \\
 \large
 \mu_g(y, x ; \theta, m)=\left(\sum_{h=1}^G \frac{\left\|y-\theta_g x\right\|^{2 /(m-1)}}{\left\|y-\theta_h x\right\|^{2 /(m-1)}}\right)^{-1}, g=1, \ldots, G
-$
+$$
 
 where $m>1$ is the regularization parameter and $\mu_g$ represent group probabilities/weights. After some algebra the objective function becomes 
 
-$
+$$
 \Large
 L_m^{F C R}(\theta, \mu)=\mathbb{E}\left[\left(\sum_{g=1}^G\left\|y-\theta_g x\right\|^{-2 /(m-1)}\right)^{1-m}\right].
-$
+$$
 
 This approximation enables us to describe FCR as a GMM and also estimation becomes a nonlinear one step optimization problem.
 
@@ -88,9 +88,9 @@ fcr_model.estimate(y, timed, X, Z, grouped_time_FE, grouped_level_FE, time_FE, p
     
     - Last 3 boolean options are provided to facilitiate user access to package features. User can put time dummies or constant vector in `X` matrix instead of assigning `True` for `grouped_time_FE` or `grouped_level_FE` options. Similiarly, if `Z` matrix has time dummies, no longer need to assign `True` to `time_FE` option.
     
-    - If `grouped_time_FE=True` and/or `grouped_level_FE=True`, the code creates time dummies and a constant vector and stack them with `X` column-wise: $[\text{time_dummies}, \text{constant}, X]$ become new heterogenous covariates.
+    - If `grouped_time_FE=True` and/or `grouped_level_FE=True`, the code creates time dummies and a constant vector and stack them with `X` column-wise: $[\text{time dummies}, \text{constant}, X]$ becomes new heterogenous covariates.
     
-    - If `time_FE=True`, the code creates time dummies and stack them with `Z` column-wise: $[\text{time_dummies}, Z]$ become new homogenous covariates.
+    - If `time_FE=True`, the code creates time dummies and stack them with `Z` column-wise: $[\text{time dummies}, Z]$ becomes new homogenous covariates.
 
 * `n_startingVal`    : scalar, number of starting values for optimization, 20 by default
     
