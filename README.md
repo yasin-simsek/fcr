@@ -26,8 +26,11 @@ The goal is to estimate the group memberships ($\gamma_{i,g}$), heterogenous coe
 $$
 \Large
 L_m^{F C R}(\theta, \mu)=\mathbb{E}\left[\sum_{g=1}^G \mu_g^m\left\|y-\theta_g x\right\|^2\right] \\
+$$
+
+$$
 \large
-\mu_g(y, x ; \theta, m)=\left(\sum_{h=1}^G \frac{\left\|y-\theta_g x\right\|^{2 /(m-1)}}{\left\|y-\theta_h x\right\|^{2 /(m-1)}}\right)^{-1}, g=1, \ldots, G
+\mu_g(y, x ; \theta, m)=\left(\sum_{h=1}^G \frac{\left\|y-\theta_g x\right\|^{2 /(m-1)}}{\left\|y-\theta_h x\right\|^{2 /(m-1)}}\right)^{-1}; g=1, \ldots, G
 $$
 
 where $m>1$ is the regularization parameter and $\mu_g$ represent group probabilities/weights. After some algebra the objective function becomes 
@@ -100,7 +103,7 @@ fcr_model.estimate(y, timed, X, Z, grouped_time_FE, grouped_level_FE, time_FE, p
 
     - If `parallel=True`, then the package runs the estimation in parallel cores over the set of starting values. This substantially reduces the computation time.
 
-## Methods for estimated model
+## Methods for an Estimated Model
 This package provides lots of useful methods which can be applied to an estimated model(except `estimate()` method). Here is the list of them. The user can access more information by typing `help(FCR.method_name)`.
 * `estimate()`: returns an estimated FCR object.
 * `predict()`: returns fitted values for `y` dependent variable.
@@ -110,9 +113,12 @@ This package provides lots of useful methods which can be applied to an estimate
 
     The ordering of coefficient is as follows: it starts with the heterogenous coeffcients of group 1 and it continues until group G. Lastly, homogenous coefficients are added.
     
+$$    
 \begin{equation}
 [\theta_0,...,\theta_{G-1},\beta]
 \end{equation}
+$$
+
 * `grouped_time_FE()`: returns grouped time fixed effects if any.
 * `vcov()`: return variance-covariance matrix of coefficient estimates
 * `stderror()`: return standard erors of coefficient estimates
