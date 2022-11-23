@@ -17,14 +17,18 @@ class FCR():
     # class wide constants
     eps = 1e-6
 
-    def __init__(self, m, G, y=None, timed=None, X=None, Z=None, params=None):
+    def __init__(self, m, G):
         self.m = m
         self.G = G
-        self.params = params
-        self.y = y
-        self.timed = timed
-        self.X = X
-        self.Z = Z
+        self._coef = None
+        self._y = None
+        self._timed = None
+        self._X = None
+        self._Z = None
+        self._grouped_time_FE = False
+        self._grouped_level_FE = False
+        self._time_FE = False
+        self._vcov = None
     
 
     ## PROPERTIES
@@ -53,7 +57,8 @@ class FCR():
 
     ## METHODS
 
-    def estimate(self, y, timed, X=None, Z=None, grouped_time_FE=False, grouped_level_FE=False, time_FE=False, parallel=False, n_startingVal=20):
+    def estimate(self, y, timed, X=None, Z=None, grouped_time_FE=False, grouped_level_FE=False, time_FE=False,
+                     parallel=False, n_startingVal=20):
         """
         This method estimates parameters of FCR model based on user inputs. 
         Then, it updates attributes of FCR object.
@@ -67,6 +72,8 @@ class FCR():
             grouped_time_FE  : T/F, grouped time fixed effect, False by default
             grouped_level_FE : T/F, grouped level fixed effect, False by default
             time_FE          : T/F, time fixed effect, False by default
+            parallel         : T/F, parallelize the estimation procedure, False by default
+            n_startingVal    : scalar, number of starting values for optimization, 20 by default
             
         Outputs:
             self             : FCR object, updated with estimation results
@@ -93,30 +100,18 @@ class FCR():
         # fit homogenous model
         Xnew = np.column_stack((X,Z)) if Z is not None else X
         homo_reg = sm.OLS(y, Xnew).fit()
-        homo_params = homo_reg.params # (K+L)x1 vector
+        homo_coef = homo_reg.params # (K+L)x1 vector
 
         # starting value generation 
         startingVals = [None]*n_startingVal
         for i in range(n_startingVal):
-            '''
-            temp = np.tile(homo_params[:K], G)
-            temp += np.random.normal(0,0.01,G*K)
-
-            for g in range(G-1):
-                if temp[g*K] > temp[g*K+K]:
-                    foo = temp[g*K]
-                    temp[g*K] = np.copy(temp[g*K+K])
-                    temp[g*K+K] = foo
-            
-            startingVals[i] = np.append(temp,homo_params[K:]) 
-            '''
-
+             
             temp = np.zeros((G,K))
             for j in range(G):
-                temp[j,:] = homo_params[:K] + np.random.normal(0,0.1,K)    
+                temp[j,:] = homo_coef[:K] + np.random.normal(0,0.1,K)    
 
             temp = temp[temp[:, 0].argsort()]
-            startingVals[i] = np.append(temp.flatten(),homo_params[K:]) 
+            startingVals[i] = np.append(temp.flatten(),homo_coef[K:]) 
 
         # optimization of objective function
         # TODO: data driven bounds?
@@ -155,11 +150,14 @@ class FCR():
                     obj_val = np.copy(obj_val_new)
         
         # update the model object(self)
-        self.params = estimates
-        self.y = y
-        self.timed = timed
-        self.X = X
-        self.Z = Z
+        self._coef = estimates
+        self._y = y
+        self._timed = timed
+        self._X = X
+        self._Z = Z
+        self._grouped_time_FE = grouped_time_FE
+        self._grouped_level_FE = grouped_level_FE
+        self._time_FE = time_FE
 
         return self
 
@@ -177,10 +175,10 @@ class FCR():
         """
 
         # data matrices
-        y = self.y
-        timed = self.timed
-        X = self.X
-        Z = self.Z
+        y = self._y
+        timed = self._timed
+        X = self._X
+        Z = self._Z
         
         # dimensions
         T = len(np.unique(timed))
@@ -192,12 +190,12 @@ class FCR():
         G = self.G
 
         # parameters
-        params = self.params
-        theta = params[0:G*K] # G*Kx1 vector
-        beta = params[G*K:] # Lx1 vector
+        coef = self._coef
+        theta = coef[0:G*K] # G*Kx1 vector
+        beta = coef[G*K:] # Lx1 vector
 
         # estimated clusters
-        clusters = self.get_clusters()
+        clusters = self.clusters()
 
         # calculate predictions
         yhat = np.zeros(N*T)
@@ -224,34 +222,34 @@ class FCR():
         
         """ 
 
-        y = self.y # true values
+        y = self._y # true values
         yhat = self.predict() # predictions
 
         nuhat = y - yhat # residual
 
         return nuhat
 
-    def momentfun(self, params):
+    def momentfun(self, coef):
         """
         This method returns the moment functions fo FCR model in the spirit of GMM.
         See Equation 12 of Lewis et al. 2022
 
         Inputs:
             self   : FCR object, estimated FCR model
-            params : (G*K+L)x1 vector, parameter values, estimated parameters by default
+            coef   : (G*K+L)x1 vector, parameter values, estimated parameters by default
 
         Outputs:
             eta    : Nx(G*K+L) matrix, moment function for each unit and parameter
 
-        Note: Extra params input is added to exploit in derivative(gradient) calculation
+        Note: Extra coef input is added to exploit in derivative(gradient) calculation
 
         """
 
         # data matrices
-        y = self.y
-        timed = self.timed
-        X = self.X
-        Z = self.Z
+        y = self._y
+        timed = self._timed
+        X = self._X
+        Z = self._Z
         
         # dimensions
         T = len(np.unique(timed))
@@ -266,14 +264,14 @@ class FCR():
         m = self.m
 
         # parameters
-        theta = params[0:G*K] # G*Kx1 vector
-        beta = params[G*K:] # Lx1 vector
+        theta = coef[0:G*K] # G*Kx1 vector
+        beta = coef[G*K:] # Lx1 vector
 
         # cluster probabilities
-        mu = self.get_cluster_probs() # NxG matrix 
+        mu = self.cluster_probs() # NxG matrix 
         
         # compute eta function
-        eta = np.zeros((N,len(params)))
+        eta = np.zeros((N,len(coef)))
         for i in range(N):
             for g in range(G):
 
@@ -300,42 +298,50 @@ class FCR():
             vcov_mat : (G*K+L)x(G*K+L) matrix, variance-covariance matrix
 
         """
+        if self._vcov is not None: # if it is estimated before don't estimate again
+
+            return self._vcov 
+
+        else:
         
-        # parameter estimates
-        params = self.params
+            # parameter estimates
+            coef = self._coef
 
-        # moment function
-        eta = self.momentfun(params=params)
+            # moment function
+            eta = self.momentfun(coef=coef)
 
-        # number of units 
-        N = eta.shape[0]
+            # number of units 
+            N = eta.shape[0]
 
-        # outer product of moment function, see Assumption 2 Condition 7 in Lewis et al.(2022)
-        V = eta.T @ eta / N
+            # outer product of moment function, see Assumption 2 Condition 7 in Lewis et al.(2022)
+            V = eta.T @ eta / N
 
-        # gradient of moment function, see Assumption 2 Condition 5 in Lewis et al.(2022)
-        H = np.zeros((len(params),len(params)))
-        params_abs = np.absolute(params)
-        step = np.minimum(1e-5*params_abs,params_abs)
-        step = np.diag(step)
-        
-        for jj in range(len(params)):
+            # gradient of moment function, see Assumption 2 Condition 5 in Lewis et al.(2022)
+            H = np.zeros((len(coef),len(coef)))
+            coef_abs = np.absolute(coef)
+            step = np.minimum(1e-5*coef_abs,coef_abs)
+            step = np.diag(step)
             
-            eta_ = self.momentfun(params=params+step[:,jj]) # Nx(G*K+L) matrix
-            
-            temp = (eta_ - eta)/step[jj,jj]
-            temp = np.sum(temp, axis=0)
-            
-            H[:,jj] = temp / N
+            for jj in range(len(coef)):
+                
+                eta_ = self.momentfun(coef=coef+step[:,jj]) # Nx(G*K+L) matrix
+                
+                temp = (eta_ - eta)/step[jj,jj]
+                temp = np.sum(temp, axis=0)
+                
+                H[:,jj] = temp / N
 
-        try:
-            Hinv = np.linalg.inv(H)
-        except:
-            Hinv = np.linalg.pinv(H)
+            try:
+                Hinv = np.linalg.inv(H)
+            except:
+                Hinv = np.linalg.pinv(H)
 
-        vcov_mat =  Hinv @ V @ Hinv / N
+            vcov_mat =  Hinv @ V @ Hinv / N
 
-        return vcov_mat
+            # update self
+            self._vcov = vcov_mat
+
+            return vcov_mat
 
     def stderror(self):
         """
@@ -366,10 +372,10 @@ class FCR():
 
         """
         
-        params = self.params # estimates
+        coef = self._coef # estimates
         se = self.stderror() # standard errors
 
-        t_stats = params/se
+        t_stats = coef/se
         
         return t_stats
 
@@ -386,17 +392,17 @@ class FCR():
 
         """
 
-        params = self.params # parameter estimates
+        coef = self._coef # parameter estimates
         z = norm.ppf(q=1-alpha) # critical values
         se = self.stderror() # standard errors
 
-        ci = np.zeros((len(params),2)) # confidence intervals
-        ci[:,0] = params - z*se
-        ci[:,1] = params + z*se
+        ci = np.zeros((len(coef),2)) # confidence intervals
+        ci[:,0] = coef - z*se
+        ci[:,1] = coef + z*se
 
         return ci
 
-    def Rsquared(self):
+    def rsquared(self):
         """
         This method computes R^2 for fuzzy clustering regression.
 
@@ -408,7 +414,7 @@ class FCR():
             
         """
 
-        y = self.y # true values
+        y = self._y # true values
         yhat = self.predict() # model predictions
 
         SSR = np.sum((y-yhat)**2) # sum of squared residuals
@@ -417,11 +423,9 @@ class FCR():
 
         return R2 
 
-    def AIC(self):
+    def aic(self):
         """
         This method computes AIC for fuzzy clustering regression.
-
-        AIC = 2*K + (N*T)*log(SSR)
 
         Inputs:
             self : FCR object, estimated FCR model
@@ -431,10 +435,10 @@ class FCR():
             
         """
 
-        y = self.y # true values
+        y = self._y # true values
         yhat = self.predict() # model predictions
 
-        K = len(self.params) # number of parameters
+        K = len(self._coef) # number of parameters
         NT = len(y) # number of data points
 
         SSR = np.sum((y-yhat)**2) # sum of squared residuals
@@ -443,47 +447,84 @@ class FCR():
 
         return aic     
 
-    def BIC(self):
+    def bic(self):
         """
         This method computes BIC for fuzzy clustering regression.
-
-        BIC = K*log(N*T) + (N*T)*log(SSR/(N*T))
 
         Inputs:
             self : FCR object, estimated FCR model
 
         Outputs:
-            aic   : AIC statistic of FCR model
+            bic   : BIC statistic of FCR model
             
         """
         
-        y = self.y # true values
-        yhat = self.predict() # model predictions
+         # data matrices
+        y = self._y
+        timed = self._timed
+        X = self._X
+        Z = self._Z
+        
+        # dimensions
+        T = len(np.unique(timed))
+        N = int(len(y)/T)
+        K = X.shape[1]
+        L = Z.shape[1] if Z is not None else 0
 
-        K = len(self.params) # number of parameters
-        NT = len(y) # number of data points
+        G = self.G # number of groups
+
+        yhat = self.predict() # model predictions
 
         SSR = np.sum((y-yhat)**2) # sum of squared residuals
 
-        bic = K*np.log(NT) + NT*np.log(SSR/NT) # BIC
+        sigma2hat = SSR/(N*T-G*K-L) # variance of nu estimate
+
+        bic =  SSR/(N*T) + sigma2hat*(G*K+L)*np.log(N*T)/(N*T) # BIC
 
         return bic
 
+    def coef(self):
+        """
+        This method returns coefficient estimates.
+
+        Inputs:
+            self         : FCR object, estimated FCR model
+
+        Outputs:
+            self._coef   : coefficients
+
+        """
+        return self._coef
+
+    
     def grouped_time_FE(self):
+        """
+        This method returns grouped time fixed efffect estimates if any.
 
-        T = len(np.unique(self.timed)) # time dimension
-        G = self.G # number of groups
+        Inputs:
+            self              : FCR object, estimated FCR model
 
-        params = self.params # parameter estimates
+        Outputs:
+            grouped_time_FE   : (GxT) matrix, grouped time fixed effect estimations
 
-        # consider first G*T heterogenous covariates
-        grouped_time_FE = np.zeros((G,T))
-        for g in range(G):
-            grouped_time_FE[g,:] = params[g*T:g*T+T]
+        """
+
+        if self._grouped_time_FE != True:
+            raise NameError('This model does not contain grouped time fixed effect!')
+        else:
+            T = len(np.unique(self._timed)) # time dimension
+            G = self.G # number of groups
+
+            coef = self._coef # parameter estimates
+
+            # consider first G*T heterogenous covariates
+            grouped_time_FE = np.zeros((G,T))
+            for g in range(G):
+                grouped_time_FE[g,:] = coef[g*T:g*T+T]
 
         return grouped_time_FE
 
-    def get_cluster_probs(self):
+    def cluster_probs(self):
         """
         This method returns the implied cluster probabilities for each unit. 
         
@@ -498,10 +539,10 @@ class FCR():
         """
         
         # data
-        y = self.y
-        timed = self.timed
-        X = self.X
-        Z = self.Z
+        y = self._y
+        timed = self._timed
+        X = self._X
+        Z = self._Z
         m = self.m
         G = self.G
 
@@ -514,9 +555,9 @@ class FCR():
         L = Z.shape[1] if Z is not None else 0
         
         # parameters
-        params = self.params
-        theta = params[0:G*K] # G*Kx1 vector
-        beta = params[G*K:] # Lx1 vector
+        coef = self._coef
+        theta = coef[0:G*K] # G*Kx1 vector
+        beta = coef[G*K:] # Lx1 vector
 
         # residual as a tensor
         nu = np.zeros((N,T,G))
@@ -547,7 +588,7 @@ class FCR():
 
         return cluster_probs
 
-    def get_clusters(self):
+    def clusters(self):
         """
         This method returns the implied cluster assignments for each unit. 
         
@@ -560,7 +601,7 @@ class FCR():
         """
 
         # get cluster probabilities
-        cluster_probs = self.get_cluster_probs()
+        cluster_probs = self.cluster_probs()
 
         # pick the cluster with the greatest probability
         clusters = np.argmax(cluster_probs, axis=1)
@@ -580,10 +621,10 @@ class FCR():
         """
         
         # data
-        y = self.y
-        timed = self.timed
-        X = self.X
-        Z = self.Z
+        y = self._y
+        timed = self._timed
+        X = self._X
+        Z = self._Z
 
         # hyper parameters
         m = self.m
@@ -595,8 +636,8 @@ class FCR():
         K = X.shape[1]
         L = Z.shape[1] if Z is not None else 0
 
-        params = self.params
-        names = [None]*len(params)
+        coef = self._coef
+        names = [None]*len(coef)
         for g in range(G):
             for k in range(K):
                 names[g*K+k] = 'theta_{0:.0f}{1:.0f}'.format(g,k)
@@ -621,25 +662,26 @@ class FCR():
 
         # general estimation inference results
         names = self.param_names()
-        params = self.params
+        coef = self._coef
         se = self.stderror()
-        t_stats = params/se
+        t_stats = coef/se
         p_values = 1-norm.cdf(np.absolute(t_stats))
         ci_mat = self.confint(alpha=alpha)
 
         # transform ci to list of tuples
-        ci = [np.nan]*len(params)
-        for i in range(len(params)):
+        ci_mat = np.around(ci_mat,decimals=3)
+        ci = [np.nan]*len(coef)
+        for i in range(len(coef)):
             ci[i] = (ci_mat[i,0],ci_mat[i,1])
 
         # results table
         results = pd.DataFrame(columns=['Parameter','Estimate','Std Error','t-stat','Pr(>|t|)','CI'])
 
         results['Parameter'] = names
-        results['Estimate'] = params
-        results['Std Error'] = se
-        results['t-stat'] = t_stats
-        results['Pr(>|t|)'] = p_values
+        results['Estimate'] = coef.round(3)
+        results['Std Error'] = se.round(3)
+        results['t-stat'] = t_stats.round(3)
+        results['Pr(>|t|)'] = p_values.round(3)
         results['CI'] = ci
 
         return results
@@ -647,14 +689,14 @@ class FCR():
     ## STATIC METHODS
 
     @staticmethod
-    def objective_fun(params,y,timed,X,Z,m,G):
+    def objective_fun(coef,y,timed,X,Z,m,G):
         '''
         This is the objectice function of FCR.
 
         y_it = x_it'*theta_g + z_it*beta + eps_it
         
         Inputs:
-            params   : (L+G*K)x1 vector, model parameters
+            coef     : (L+G*K)x1 vector, model parameters
             y        : (N*T)x1 vector, dependent variable
             timed    : (N*T)x1 vector, time vector
             X        : (N*T)xK matrix, heterogenous covariates
@@ -677,8 +719,8 @@ class FCR():
         L = Z.shape[1] if Z is not None else 0
 
         # parameters
-        theta = params[0:G*K] # G*Kx1 vector
-        beta = params[G*K:] # Lx1 vector
+        theta = coef[0:G*K] # G*Kx1 vector
+        beta = coef[G*K:] # Lx1 vector
 
         # residual as a tensor
         nu = np.zeros((N,T,G))
@@ -878,6 +920,11 @@ class FCR():
             if np.any(np.isnan(Z)):
                 raise ValueError('Z contains nan values')
 
-        # check not numeric values
+        
+
+
+
+
+
 
 
