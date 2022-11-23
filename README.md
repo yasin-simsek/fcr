@@ -6,9 +6,10 @@ It extends "Fuzzy C-Means" algorithms to regression setup and approximates "Hard
 
 The general specification of Fuzzy Clustering Regression is as follows:
 
-$
+\begin{equation}
 y_i  = \sum_{g=1}^G \gamma_{i,g} x_i \theta_g +  z_i \beta + \nu_i
-$
+\end{equation}
+
 
 where $i=1,2,...,N$, $y_i \in \mathbb{R}^T$, $x_i \in \mathbb{R}^T \times \mathbb{R}^K$, $z_i \in \mathbb{R}^T \times \mathbb{R}^L$ and $\gamma_{i,g} = \mathbb{1}[g_i=g]$. Note that $\theta_g$ is a $K \times 1$ vector representing the group specific (heterogenous) coeffcieints and $\beta$ is $Lx1$ vector stands for homogenous coeffcients. Finally, we assume $\mathbb{E}[\nu_i|g_i=g]=0$.
 
