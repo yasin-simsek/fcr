@@ -11,7 +11,7 @@ class FCR():
     This class creats Fuzzy Clustering Regression Model objects. It has several attributes.
     Several methods like estimation,prediction etc are also provided.
 
-    For details see Lewis et al. (2022)
+    For details see Lewis et al. (2022).
     
     """
 
