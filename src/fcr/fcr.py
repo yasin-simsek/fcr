@@ -175,7 +175,7 @@ class FCR():
             for startingVal in startingVals:
                 
                 # estimate coefficients given startingVal
-                estimates_new, obj_val_new = FCR.optimize_FCR(y, timed, X, Z, m, G, startingVal)
+                estimates_new, obj_val_new = FCR.optimize_FCR(y, timed, X, Z, m, G, algorithm, tolerance, bounds, startingVal)
                 
                 # update the estimates if necessary
                 if obj_val_new < obj_val:
