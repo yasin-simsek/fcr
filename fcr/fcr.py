@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+import os
 from scipy.optimize import minimize, LinearConstraint
 from scipy.stats import norm
 from concurrent import futures
@@ -29,8 +30,8 @@ class FCR():
         self._grouped_level_FE = False
         self._time_FE = False
         self._vcov = None
+        self._df = None
     
-
     ## PROPERTIES
 
     @property
@@ -58,9 +59,10 @@ class FCR():
     ## METHODS
 
     def estimate(self, y, timed, X=None, Z=None, grouped_time_FE=False, grouped_level_FE=False, time_FE=False,
-                     parallel=False, n_startingVal=20):
+                    algorithm='slsqp', tolerance=1e-6, bounds=None, parallel=False,
+                    n_cores=os.cpu_count(), n_startingVal=20, **kwargs):
         """
-        This method estimates parameters of FCR model based on user inputs. 
+        This method estimates coefficients of FCR model based on user inputs. 
         Then, it updates attributes of FCR object.
         
         Inputs:
@@ -72,17 +74,48 @@ class FCR():
             grouped_time_FE  : T/F, grouped time fixed effect, False by default
             grouped_level_FE : T/F, grouped level fixed effect, False by default
             time_FE          : T/F, time fixed effect, False by default
+            
+            algorithm        : 'slsqp' or 'trust-constr', optimization algorithm, 'slsqp' by default
+            tolerance        : scalar, optimization tolerance, 1e-6 by default
+            bounds           : (G*K+L)x1 list of tuples, bounds for coefficients, None by default
             parallel         : T/F, parallelize the estimation procedure, False by default
+            n_cores          : scalar, number of cores for parallel estimation, max avaliable core in the machine by default
             n_startingVal    : scalar, number of starting values for optimization, 20 by default
             
+            **kwargs         : dict, keyword arguments (for data frame option)
+
         Outputs:
             self             : FCR object, updated with estimation results
 
         """
         np.random.seed(seed=1453)
+
+        # check data frame presence
+        if 'df' in kwargs.keys():
+
+            df = kwargs['df']
+
+            # keep column names
+            self._X_names = X
+            self._Z_names = Z
+
+            # assign data matrices
+            y = np.asarray(df[y]).flatten()
+            timed = np.asarray(df[timed]).flatten()
+            X = np.asarray(df[X]) if X is not None else None
+            Z = np.asarray(df[Z]) if Z is not None else None
+
+            # update model object
+            self._df = df
         
+        else: # keep column names
+            self._X_names = np.arange(X.shape[1]) if X is not None else None
+            self._Z_names = np.arange(Z.shape[1]) if Z is not None else None
+
         # input checking
         FCR.input_checking(y,timed, X, Z, grouped_time_FE, grouped_level_FE, time_FE)
+
+        # keep column names
 
         # construction of data matrices
         X, Z = FCR.construct_data(timed, X, Z, grouped_time_FE, grouped_level_FE, time_FE)
@@ -114,13 +147,10 @@ class FCR():
             startingVals[i] = np.append(temp.flatten(),homo_coef[K:]) 
 
         # optimization of objective function
-        # TODO: data driven bounds?
-        #bounds = [(0,10)]*(G*T*K)
-        bounds = [(0,10)]*(L+G*K)
 
         if parallel is True:
                 
-            with futures.ProcessPoolExecutor() as executor:
+            with futures.ProcessPoolExecutor(max_workers=n_cores) as executor:
                 
                 results = executor.map(FCR.optimize_FCR,
                                         [y for i in range(len(startingVals))],
@@ -129,6 +159,9 @@ class FCR():
                                         [Z for i in range(len(startingVals))],
                                         [m for i in range(len(startingVals))],
                                         [G for i in range(len(startingVals))],
+                                        [algorithm for i in range(len(startingVals))],
+                                        [tolerance for i in range(len(startingVals))],
+                                        [bounds for i in range(len(startingVals))],
                                         startingVals)
 
                 results_mat = np.asarray(list(results))
@@ -141,7 +174,7 @@ class FCR():
             obj_val = np.inf
             for startingVal in startingVals:
                 
-                # estimate the parameters given startingVal
+                # estimate coefficients given startingVal
                 estimates_new, obj_val_new = FCR.optimize_FCR(y, timed, X, Z, m, G, startingVal)
                 
                 # update the estimates if necessary
@@ -189,7 +222,7 @@ class FCR():
         # number of groups
         G = self.G
 
-        # parameters
+        # coefficients
         coef = self._coef
         theta = coef[0:G*K] # G*Kx1 vector
         beta = coef[G*K:] # Lx1 vector
@@ -236,10 +269,10 @@ class FCR():
 
         Inputs:
             self   : FCR object, estimated FCR model
-            coef   : (G*K+L)x1 vector, parameter values, estimated parameters by default
+            coef   : (G*K+L)x1 vector, coefficients values, estimates by default
 
         Outputs:
-            eta    : Nx(G*K+L) matrix, moment function for each unit and parameter
+            eta    : Nx(G*K+L) matrix, moment function for each unit and coefficient
 
         Note: Extra coef input is added to exploit in derivative(gradient) calculation
 
@@ -263,7 +296,7 @@ class FCR():
         # regularization parameter
         m = self.m
 
-        # parameters
+        # coefficients
         theta = coef[0:G*K] # G*Kx1 vector
         beta = coef[G*K:] # Lx1 vector
 
@@ -283,10 +316,9 @@ class FCR():
         
         return eta
 
-
     def vcov(self):
         """
-        This method returns the variance covariance matrix of the estimated parameters.
+        This method returns the variance covariance matrix of the estimated coefficients.
         See Proposition 3 of Lewis et al. 2022
 
         variance-covariance matrix = Hinv * V * Hinv / N
@@ -304,7 +336,7 @@ class FCR():
 
         else:
         
-            # parameter estimates
+            # estimates
             coef = self._coef
 
             # moment function
@@ -345,7 +377,7 @@ class FCR():
 
     def stderror(self):
         """
-        This method return standard errors for parameter estimates.
+        This method return standard errors for coefficient estimates.
 
         Inputs:
             self : FCR object, estimated FCR model
@@ -354,21 +386,27 @@ class FCR():
             se   : ((G*K+L)x1) vector, standard errors
 
         """
-        
-        vcov_mat = self.vcov() # variance-covariance matrix
-        se = np.sqrt(np.diag(vcov_mat)) # standard errors
+
+        # variance-covariance matrix
+        if self._vcov is None:
+            vcov_mat = self.vcov()
+        else:
+            vcov_mat = self._vcov
+
+        # standard errors
+        se = np.sqrt(np.diag(vcov_mat)) 
 
         return se
 
     def tstat(self):
         """
-        This method return standard errors for parameter estimates.
+        This method return standard errors for coefficient estimates.
 
         Inputs:
             self    : FCR object, estimated FCR model
 
         Outputs:
-            t_stats : ((G*K+L)x1) vector, t statistics for each parameter
+            t_stats : ((G*K+L)x1) vector, t statistics for each coefficient
 
         """
         
@@ -381,7 +419,7 @@ class FCR():
 
     def confint(self,alpha=0.05):
         """
-        This method return standard errors for parameter estimates.
+        This method return standard errors for coefficient estimates.
 
         Inputs:
             self  : FCR object, estimated FCR model
@@ -392,7 +430,7 @@ class FCR():
 
         """
 
-        coef = self._coef # parameter estimates
+        coef = self._coef # coefficient estimates
         z = norm.ppf(q=1-alpha) # critical values
         se = self.stderror() # standard errors
 
@@ -401,51 +439,6 @@ class FCR():
         ci[:,1] = coef + z*se
 
         return ci
-
-    def rsquared(self):
-        """
-        This method computes R^2 for fuzzy clustering regression.
-
-        Inputs:
-            self : FCR object, estimated FCR model
-
-        Outputs:
-            R2   : R^2 of FCR model
-            
-        """
-
-        y = self._y # true values
-        yhat = self.predict() # model predictions
-
-        SSR = np.sum((y-yhat)**2) # sum of squared residuals
-        SST = np.sum((y-np.mean(y))**2) # total sum of squares
-        R2 = 1-SSR/SST
-
-        return R2 
-
-    def aic(self):
-        """
-        This method computes AIC for fuzzy clustering regression.
-
-        Inputs:
-            self : FCR object, estimated FCR model
-
-        Outputs:
-            aic   : AIC statistic of FCR model
-            
-        """
-
-        y = self._y # true values
-        yhat = self.predict() # model predictions
-
-        K = len(self._coef) # number of parameters
-        NT = len(y) # number of data points
-
-        SSR = np.sum((y-yhat)**2) # sum of squared residuals
-
-        aic = 2*K + NT*np.log(SSR) # AIC
-
-        return aic     
 
     def bic(self):
         """
@@ -499,7 +492,7 @@ class FCR():
     
     def grouped_time_FE(self):
         """
-        This method returns grouped time fixed efffect estimates if any.
+        This method returns grouped time fixed efffect estimates, if any.
 
         Inputs:
             self              : FCR object, estimated FCR model
@@ -510,19 +503,60 @@ class FCR():
         """
 
         if self._grouped_time_FE != True:
-            raise NameError('This model does not contain grouped time fixed effect!')
+            raise NameError('This model does not have grouped time fixed effect!')
         else:
             T = len(np.unique(self._timed)) # time dimension
+            K = (self._X).shape[1] # number of heterogenous coefs
             G = self.G # number of groups
 
-            coef = self._coef # parameter estimates
+            coef = self._coef # coefficient estimates
 
             # consider first G*T heterogenous covariates
             grouped_time_FE = np.zeros((G,T))
             for g in range(G):
-                grouped_time_FE[g,:] = coef[g*T:g*T+T]
+                grouped_time_FE[g,:] = coef[g*K:g*K+T]
 
         return grouped_time_FE
+
+    def grouped_level_FE(self):
+        """
+        This method returns grouped level fixed efffect estimates, if any.
+
+        Inputs:
+            self              : FCR object, estimated FCR model
+
+        Outputs:
+            grouped_level_FE  : (Gx1) vector, grouped level fixed effect estimations
+
+        """
+
+        if self._grouped_level_FE != True:
+            raise NameError('This model does not have grouped level fixed effect!')
+        
+        else:
+            if self._grouped_time_FE == False:
+                K = (self._X).shape[1] # number of heterogenous coefs
+                G = self.G # number of groups
+
+                coef = self._coef # coefficient estimates
+
+                grouped_level_FE = np.zeros(G,)
+                for g in range(G):
+                    grouped_level_FE[g] = coef[g*K]
+
+            else:
+                T = len(np.unique(self._timed)) # time dimension
+                K = (self._X).shape[1] # number of heterogenous coefs
+                G = self.G # number of groups
+
+                coef = self._coef # coefficient estimates
+
+                grouped_level_FE = np.zeros((G,T))
+                for g in range(G):
+                    grouped_level_FE[g] = coef[g*K+T-1]
+
+        return grouped_level_FE
+
 
     def cluster_probs(self):
         """
@@ -554,7 +588,7 @@ class FCR():
         K = X.shape[1]
         L = Z.shape[1] if Z is not None else 0
         
-        # parameters
+        # coefficient estimates
         coef = self._coef
         theta = coef[0:G*K] # G*Kx1 vector
         beta = coef[G*K:] # Lx1 vector
@@ -608,15 +642,59 @@ class FCR():
 
         return clusters
 
-    def param_names(self):
+    def distribution(self, idx):
         """
-        This method returns names for estimated parameters. 
+        This method returns the distriution of weighted coeffcients.
+
+        Inputs:
+            self  : FCR object, estimated FCR model
+            idx   : scalar or string, index or name of the hetergenous covariate 
+        
+        Outputs:
+            dist  : (Nx1) vector, weighted coefficients
+
+        """
+        
+        # dimensions
+        T = len(np.unique(self._timed))
+        K = (self._X).shape[1]
+        G = self.G
+
+        # find the index
+        if type(idx) != int and type(idx) != float:
+            df = self._df
+            idx = (df.columns).index(idx)
+
+        if self._grouped_time_FE == True:
+            idx = idx + T 
+
+        elif self._grouped_level_FE == True:
+            idx = idx + 1
+
+        # gather related coeffcients
+        coef = self._coef
+        coef_ = np.zeros(G)
+        for g in range(G):
+            coef_[g] = np.copy(coef[idx+g*K])
+
+        # group weights
+        weights = self.cluster_probs()
+
+        # distribution
+        dist = weights * coef_
+        dist = np.mean(dist, axis=1)
+
+        return dist
+
+    def coef_names(self):
+        """
+        This method returns names for estimated coefficients. 
         
         Inputs:
             self  : FCR object, estimated FCR model
 
         Outputs:
-            names : ((G*K+L)x1) vector, parameter names
+            names : ((G*K+L)x1) vector, coefficient names
 
         """
         
@@ -636,20 +714,38 @@ class FCR():
         K = X.shape[1]
         L = Z.shape[1] if Z is not None else 0
 
+        # column names for X and Z
+        X_names = self._X_names
+        X_names = [] if X_names is None else X_names
+        Z_names = self._Z_names
+        Z_names = [] if Z_names is None else Z_names
+        
+        if self._grouped_time_FE:
+            if self._grouped_level_FE:
+                X_names = ['time'+str(i) for i in range(1,T)]+['level']+ X_names
+            else:
+                X_names = ['time'+str(i) for i in range(0,T)]+ X_names
+        else:
+            if self._grouped_level_FE:
+                X_names = ['level']+ X_names
+            else:
+                pass
+
+
         coef = self._coef
         names = [None]*len(coef)
         for g in range(G):
             for k in range(K):
-                names[g*K+k] = 'theta_{0:.0f}{1:.0f}'.format(g,k)
+                    names[g*K+k] = 'theta_{0:.0f}_{1:s}'.format(g,str(X_names[k]))
 
         for l in range(L):
-            names[G*K+l] = 'beta_{0:.0f}'.format(l)
+                names[G*K+l] = 'beta_{0:s}'.format(str(Z_names[l]))
 
         return names
 
     def summarize(self,alpha=0.05):
         """
-        This method return standard errors for parameter estimates.
+        This method return standard errors for coefficient estimates.
 
         Inputs:
             self    : FCR object, estimated FCR model
@@ -661,7 +757,7 @@ class FCR():
         """
 
         # general estimation inference results
-        names = self.param_names()
+        names = self.coef_names()
         coef = self._coef
         se = self.stderror()
         t_stats = coef/se
@@ -675,9 +771,9 @@ class FCR():
             ci[i] = (ci_mat[i,0],ci_mat[i,1])
 
         # results table
-        results = pd.DataFrame(columns=['Parameter','Estimate','Std Error','t-stat','Pr(>|t|)','CI'])
+        results = pd.DataFrame(columns=['Coefficient','Estimate','Std Error','t-stat','Pr(>|t|)','CI'])
 
-        results['Parameter'] = names
+        results['Coefficient'] = names
         results['Estimate'] = coef.round(3)
         results['Std Error'] = se.round(3)
         results['t-stat'] = t_stats.round(3)
@@ -696,7 +792,7 @@ class FCR():
         y_it = x_it'*theta_g + z_it*beta + eps_it
         
         Inputs:
-            coef     : (L+G*K)x1 vector, model parameters
+            coef     : (L+G*K)x1 vector, model coefficients
             y        : (N*T)x1 vector, dependent variable
             timed    : (N*T)x1 vector, time vector
             X        : (N*T)xK matrix, heterogenous covariates
@@ -718,7 +814,7 @@ class FCR():
         K = X.shape[1]
         L = Z.shape[1] if Z is not None else 0
 
-        # parameters
+        # coefficients
         theta = coef[0:G*K] # G*Kx1 vector
         beta = coef[G*K:] # Lx1 vector
 
@@ -748,7 +844,7 @@ class FCR():
 
     # estimation function given startignVals for optimization
     @staticmethod
-    def optimize_FCR(y, timed, X, Z, m, G, startingVal):
+    def optimize_FCR(y, timed, X, Z, m, G, algorithm, tolerance, bounds, startingVal):
         """
         This function optimize the FCR objective function given starting values for the optimization routine.
 
@@ -759,11 +855,14 @@ class FCR():
             Z           : (N*T)xL matrix, homogenous covariates, None by default
             m           : scalar, regularization parameter
             G           : scalar, number of groups
+            algorithm   : string, name of the optimization algorithm
+            tolerance   : scalar, tolerance level for optimization
+            bounds      : ((K*G+L)x1) list of tuples, upper and lower bounds
             startingVal : ((K*G+L)x1) vector, starting values for optimization
             
         Outputs:
-            results.x   : ((K*G+L)x1) vector, estimated parameters
-            results.fun : scalar, value of objective function at estimated parameters
+            results.x   : ((K*G+L)x1) vector, estimated coefficients
+            results.fun : scalar, value of objective function at estimated coefficients
 
         """
         # dimensions
@@ -789,8 +888,10 @@ class FCR():
             print('startingVal does not satisfy FE ordering')
 
         # optimization
-        results = minimize(FCR.objective_fun, startingVal, method='SLSQP', constraints=lin_cons,
-                                    options={'ftol':1e-10,'maxiter':1e5},
+        results = minimize(FCR.objective_fun, startingVal, method=algorithm, 
+                                    constraints=lin_cons,
+                                    tol=tolerance,
+                                    options={'maxiter':1e5},
                                     bounds=bounds, args=(y,timed,X,Z,m,G))
 
         return results.x, results.fun
