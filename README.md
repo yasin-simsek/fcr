@@ -74,7 +74,7 @@ To estimate the model, the package has `estimation()` method that can be applied
 
 
 ```python
-fcr_model.estimate(y, timed, X, Z, grouped_time_FE, grouped_level_FE, time_FE, parallel, n_startingVal)
+fcr_model.estimate(y, timed, X, Z, grouped_time_FE, grouped_level_FE, time_FE, parallel, n_startingVal, n_cores, algorithm, tolerance, bound, **kwargs)
 ```
 
 **Arguments:**
@@ -85,6 +85,9 @@ fcr_model.estimate(y, timed, X, Z, grouped_time_FE, grouped_level_FE, time_FE, p
     
 * `X`                : (N*T)xK matrix, heterogenous covariates, None by default
 * `Z`                : (N*T)xL matrix, homogenous covariates, None by default
+
+    ***Note***: An alternative way is to use keyword argument `df=your_data_frame` and assign list of column names for `X`,`Z` and `timed`. Check [this notebook](https://github.com/yasin-simsek/fcr/blob/main/Replication.ipynb) for an example use.
+
 * `grouped_time_FE`  : T/F, grouped time fixed effect, False by default
 * `grouped_level_FE` : T/F, grouped level fixed effect, False by default
 * `time_FE`          : T/F, time fixed effect, False by default
@@ -103,6 +106,17 @@ fcr_model.estimate(y, timed, X, Z, grouped_time_FE, grouped_level_FE, time_FE, p
 
     - If `parallel=True`, then the package runs the estimation in parallel cores over the set of starting values. This substantially reduces the computation time.
 
+**Other Arguments**
+* `n_cores` : scalar, number of cores for parallel estimation, max avaliable core in the machine by default
+
+* `algorithm` : 'slsqp' or 'trust-constr', optimization algorithm, 'slsqp' by default
+
+* `tolerance` : scalar, optimization tolerance, 1e-6 by default
+
+* `bound`: (G*K+L)x1 list of tuples, bounds for coefficients, None by default
+
+* `kwargs`: dict, keyword arguments (for data frame option)
+ 
 ## Methods for an Estimated Model
 This package provides lots of useful methods which can be applied to an estimated model(except `estimate()` method). Here is the list of them. The user can access more information by typing `help(FCR.method_name)`.
 * `estimate()`: returns an estimated FCR object.
@@ -120,11 +134,13 @@ $$
 $$
 
 * `grouped_time_FE()`: returns grouped time fixed effects if any.
-* `vcov()`: return variance-covariance matrix of coefficient estimates
-* `stderror()`: return standard erors of coefficient estimates
-* `confint()`: return confidence intervals coefficient estimates
-* `tstat()`: return t-statistics of coefficient estimates
-* `bic()`: return Bayesian Information Criteria of estimated model
+* `grouped_level_FE()`: returns grouped level fixed effects if any.
+* `distribution`: returns the distriution of weighted coeffcients.
+* `vcov()`: returns variance-covariance matrix of coefficient estimates
+* `stderror()`: returns standard erors of coefficient estimates
+* `confint()`: returns confidence intervals coefficient estimates
+* `tstat()`: returns t-statistics of coefficient estimates
+* `bic()`: returns Bayesian Information Criteria of estimated model
 * `summarize()`: returns a table which is a summary of estimation results.
 
 ## An Example
