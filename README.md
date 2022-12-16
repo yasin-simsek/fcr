@@ -135,7 +135,7 @@ $$
 
 * `grouped_time_FE()`: returns grouped time fixed effects if any.
 * `grouped_level_FE()`: returns grouped level fixed effects if any.
-* `distribution`: returns the distriution of weighted coeffcients.
+* `distribution()`: returns the distriution of weighted coeffcients.
 * `vcov()`: returns variance-covariance matrix of coefficient estimates
 * `stderror()`: returns standard erors of coefficient estimates
 * `confint()`: returns confidence intervals coefficient estimates
